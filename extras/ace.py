@@ -323,21 +323,21 @@ class BunnyAce:
                 self.read_buffer = bytearray()
             else:
                 self.read_buffer += raw_bytes
-                return eventtime + 0.1
+                return eventtime + 0.2
         else:
-            return eventtime + 0.1
+            return eventtime + 0.2
 
         if len(buffer) < 7:
-            return eventtime + 0.1
+            return eventtime + 0.2
 
         if buffer[0:2] != bytes([0xFF, 0xAA]):
             self.lock = False
             self.gcode.respond_info("Invalid data from ACE PRO (head bytes)")
             self.gcode.respond_info(str(buffer))
-            return eventtime + 0.1
+            return eventtime + 0.2
 
         payload_len = struct.unpack('<H', buffer[2:4])[0]
-        logging.info(str(buffer))
+        #logging.info(str(buffer))
         payload = buffer[4:4 + payload_len]
 
         crc_data = buffer[4 + payload_len:4 + payload_len + 2]
@@ -347,7 +347,7 @@ class BunnyAce:
             self.lock = False
             self.gcode.respond_info(f"Invalid data from ACE PRO (len) {payload_len} {len(buffer)} {crc}")
             self.gcode.respond_info(str(buffer))
-            return eventtime + 0.1
+            return eventtime + 0.2
 
         if crc_data != crc:
             self.lock = False
@@ -359,7 +359,7 @@ class BunnyAce:
             callback = self._callback_map.pop(id)
             callback(self=self, response=ret)
             self.lock = False
-        return eventtime + 0.1
+        return eventtime + 0.2
 
     def _writer(self, eventtime):
         try:
