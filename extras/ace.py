@@ -54,9 +54,7 @@ class MmuRunoutHelper:
                 logging.exception("MMU: Error running mmu sensor handler: `%s`" % command)
         self.min_event_systime = self.reactor.monotonic() + self.event_delay
 
-    # Latest klipper v0.12.0-462 added the passing of eventtime
-    #     old: note_filament_present(self, is_filament_present):
-    #     new: note_filament_present(self, eventtime, is_filament_present):
+
     def note_filament_present(self, *args):
         if len(args) == 1:
             eventtime = self.reactor.monotonic()
@@ -813,16 +811,19 @@ class BunnyAce:
         enable = gcmd.get_int('ENABLE', 1)
         self.save_variable('ace_endless_spool', bool(enable), True)
 
+    cmd_ACE_DEBUG_help = 'ACE Debug'
+
     def cmd_ACE_DEBUG(self, gcmd):
-        #self.gcode.respond_info(str(self._info))
-        def callback(self, response):
-            if 'code' in response and response['code'] != 0:
-                raise ValueError("ACE Error: " + response['msg'])
+        method = gcmd.get('METHOD')
+        params = gcmd.get('PARAMS', '{}')
 
-        self.send_request(
-            request={"method": "unwind_filament", "params": {"index": 0, "length": 100, "speed": 25, "mode": 1}},
-            callback=callback)
+        try:
+            def callback(self, response):
+                self.gcode.respond_info(str(response))
 
+            self.send_request(request={"method": method, "params": json.loads(params)}, callback=callback)
+        except Exception as e:
+            self.gcode.respond_info('Error: ' + str(e))
 
     def get_status(self, eventtime=None):
 
