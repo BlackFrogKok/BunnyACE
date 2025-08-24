@@ -153,6 +153,7 @@ class BunnyAce:
         self.feed_speed = config.getint('feed_speed', 50)
         self.retract_speed = config.getint('retract_speed', 50)
         self.toolchange_retract_length = config.getint('toolchange_retract_length', 100)
+        self.toolhead_homing_max = config.getint('toolhead_homing_max', 100)
         self.toolhead_sensor_to_nozzle_length = config.getint('toolhead_sensor_to_nozzle', 0)
         self.poop_macros = config.get('poop_macros')
         self.cut_macros = config.get('cut_macros')
@@ -427,6 +428,9 @@ class BunnyAce:
             currTs = self.reactor.monotonic()
             self.reactor.pause(currTs + .5)
 
+    def is_ace_ready(self):
+        return self._info['status'] == 'ready'
+
     def _extruder_move(self, length, speed):
         pos = self.toolhead.get_position()
         pos[3] += length
@@ -458,8 +462,6 @@ class BunnyAce:
                 pause_resume.send_resume_command()
             else:
                 self.gcode.respond_info('Filament runout! Endless spool disabled')
-
-
 
     def _create_mmu_sensor(self, config, pin, name, handler=None):
 
@@ -689,17 +691,23 @@ class BunnyAce:
             request={"method": "stop_feed_filament", "params": {"index": index}},
             callback=callback)
 
-    def _park_to_toolhead(self, tool):
+    def _park_to_toolhead(self, tool, gcmd):
 
         sensor_extruder = self.printer.lookup_object("filament_switch_sensor %s" % "extruder_sensor", None)
 
         self.wait_ace_ready()
 
         self.save_variable('ace_filament_pos',"bowden", True)
-        self._feed(tool, self.toolchange_retract_length + 200, self.retract_speed, self.toolchange_retract_length)
+        self._feed(tool,
+                   self.toolchange_retract_length + self.toolhead_homing_max,
+                   self.retract_speed,
+                   self.toolchange_retract_length
+                   )
         self._set_feeding_speed(tool, 10)
 
         while not bool(sensor_extruder.runout_helper.filament_present):
+            if self.is_ace_ready():
+                gcmd.error('ACE Error: Load failed: Failed to reach toolhead sensor')
             self.dwell(delay=0.1)
 
         self._stop_feeding(tool)
@@ -707,8 +715,6 @@ class BunnyAce:
         self.wait_ace_ready()
 
         self._enable_feed_assist(tool)
-
-
 
         if not bool(sensor_extruder.runout_helper.filament_present):
             raise ValueError("Filament stuck " + str(bool(sensor_extruder.runout_helper.filament_present)))
@@ -772,9 +778,9 @@ class BunnyAce:
             self.save_variable('ace_filament_pos', "spliter", True)
 
             if tool != -1:
-                self._park_to_toolhead(tool)
+                self._park_to_toolhead(tool, gcmd)
         else:
-            self._park_to_toolhead(tool)
+            self._park_to_toolhead(tool, gcmd)
 
         gcode_move = self.printer.lookup_object('gcode_move')
         gcode_move.reset_last_position()
@@ -804,7 +810,6 @@ class BunnyAce:
             self.write_variables()
         else:
             gcmd.respond_info('ACE_MAP' + str(gate))
-
 
     cmd_ACE_ENDLESS_SPOOL_help = 'Enable/disable ace endless spool'
     def cmd_ACE_ENDLESS_SPOOL(self, gcmd):
@@ -838,7 +843,6 @@ class BunnyAce:
             'selected_gate': int(self.save_variables.allVariables.get('ace_current_index', -1)),
             'endless_spool': bool(self.save_variables.allVariables.get('ace_endless_spool', False)),
         }
-
 
 
 def load_config(config):
