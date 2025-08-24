@@ -107,14 +107,14 @@ restart_moonraker()
     echo "[OK]"
 }
 
-function start_moonraker() {
+start_moonraker() {
   echo -n "Starting Moonraker... "
   /etc/init.d/S56moonraker_service start
   sleep 1
   echo "[OK]"
 }
 
-function stop_moonraker() {
+stop_moonraker() {
   echo -n "Stopping Moonraker... "
   /etc/init.d/S56moonraker_service stop
   sleep 1
