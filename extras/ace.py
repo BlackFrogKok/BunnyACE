@@ -833,6 +833,7 @@ class BunnyAce:
     def get_status(self, eventtime=None):
 
         return {
+            'status': self._info['status'],
             'temp': self._info['temp'],
             'dryer_status': self._info['dryer_status'],
             'gate_color': list(self.save_variables.allVariables.get('ace_gate_color')),
