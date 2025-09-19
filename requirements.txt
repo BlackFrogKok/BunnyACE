@@ -1,2 +1,0 @@
-pyserial==3.5
-pyjson==1.4.1

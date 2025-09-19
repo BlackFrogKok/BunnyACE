@@ -299,7 +299,7 @@ class BunnyAce:
         if self.lock and (self.reactor.monotonic() - self.send_time) > 2:
             self.lock = False
             self.read_buffer = bytearray()
-            self.gcode.respond_info(f"timeout {self.reactor.monotonic()} {self._serial.isOpen()}")
+            self.gcode.respond_info(f"timeout {self.reactor.monotonic()} {self._serial.is_open}")
 
         try:
             if self.lock:
@@ -492,7 +492,7 @@ class BunnyAce:
 
     def _serial_disconnect(self):
 
-        if self._serial is not None and self._serial.isOpen():
+        if self._serial is not None and self._serial.is_open:
             self._serial.close()
             self._connected = False
 
@@ -516,7 +516,7 @@ class BunnyAce:
                 timeout=0,
                 write_timeout=0)
 
-            if self._serial.isOpen():
+            if self._serial.is_open:
                 self._connected = True
                 self._request_id = 0
                 logging.info('ACE: Connected to ' + self.serial_id)
@@ -817,7 +817,6 @@ class BunnyAce:
         self.save_variable('ace_endless_spool', bool(enable), True)
 
     cmd_ACE_DEBUG_help = 'ACE Debug'
-
     def cmd_ACE_DEBUG(self, gcmd):
         method = gcmd.get('METHOD')
         params = gcmd.get('PARAMS', '{}')

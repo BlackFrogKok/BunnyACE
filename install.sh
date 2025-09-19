@@ -10,6 +10,7 @@ KLIPPER_CONFIG_HOME="${HOME}/printer_data/config"
 MOONRAKER_CONFIG_DIR="${HOME}/printer_data/config"
 SRCDIR="$PWD"
 
+
 if [ "$IS_MIPS" -eq 1 ]; then
     KLIPPER_HOME="/usr/share/klipper"
     KLIPPER_ENV="/usr/share/klippy-env"
@@ -70,9 +71,11 @@ link_extension()
 copy_config()
 {
   echo -n "Copy config file to Klipper... "
+  echo -n "[WARNING] If you have custom [save_variables], you must place the ace_vars.cfg data in your vars file and comment out [save_variables] in ace.cfg"
   if [ ! -f "${KLIPPER_CONFIG_HOME}/ace.cfg" ]; then
       cat "${SRCDIR}/ace.cfg" | sed -e "s|{config_path}|${KLIPPER_CONFIG_HOME}|g" > ace.cfg.tmp
       mv ace.cfg.tmp "${KLIPPER_CONFIG_HOME}/ace.cfg"
+      cp ace_vars.cfg "${KLIPPER_CONFIG_HOME}/ace.cfg"
       echo "[OK]"
   else
       echo "[SKIPPED]"
@@ -148,11 +151,11 @@ add_updater()
     update_section=0
     update_section=$(grep -c '\[update_manager[a-z ]* BunnyACE\]' "${MOONRAKER_CONFIG_DIR}/moonraker.conf" || true)
     if [ "$update_section" -eq 0 ]; then
-        echo -e "\n" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
+        echo "\n" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
         while read -r line; do
-            echo -e "${line}" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
+            echo "${line}" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
         done < "${SRCDIR}/templates/moonraker_update.txt"
-        echo -e "\n" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
+        echo "\n" >> ${MOONRAKER_CONFIG_DIR}/moonraker.conf
         echo "[OK]"
 
         if [ "$IS_MIPS" -eq 1 ]; then
@@ -173,7 +176,6 @@ check_folders
 stop_klipper
 
 if [ "$UNINSTALL" -ne 1 ]; then
-    install_requirements
     link_extension
     copy_config
     add_updater
