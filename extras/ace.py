@@ -157,7 +157,6 @@ class BunnyAce:
         self.toolhead_sensor_to_nozzle_length = config.getint('toolhead_sensor_to_nozzle', 0)
         self.poop_macros = config.get('poop_macros')
         self.cut_macros = config.get('cut_macros')
-        extruder_sensor_pin = config.get('extruder_sensor_pin')
 
         # self.extruder_to_blade_length = config.getint('extruder_to_blade', None)
 
@@ -215,7 +214,7 @@ class BunnyAce:
             ]
         }
         self._create_mmu_sensor(config, extruder_sensor_pin, "extruder_sensor", self.extruder_sensor_handler)
-        if toolhead_sensor_pin:
+        if toolhead_sensor_pin is not None:
             self._create_mmu_sensor(config, toolhead_sensor_pin, "toolhead_sensor")
 
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
