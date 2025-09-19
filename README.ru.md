@@ -12,7 +12,7 @@
 <p>Драйвер для Anycubic Color Engine Pro (ACE) под Klipper 🐰🎨</p>
 <p>Управление подачей нити, сменой инструмента (до 4 каналов), сушилкой ACE и сценариями прямо из Klipper/G-code.</p>
 
-[English version →](./README.en.md)
+[English version →](./README.md)
 
 </div>
 

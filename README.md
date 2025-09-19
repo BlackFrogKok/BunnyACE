@@ -12,7 +12,7 @@
 <p>Driver for Anycubic Color Engine Pro (ACE) for Klipper 🐰🎨</p>
 <p>Control filament feed, tool change (up to 4 channels), ACE dryer, and workflows right from Klipper/G-code.</p>
 
-[Русская версия →](./README.md)
+[Русская версия →](./README.ru.md)
 
 </div>
 
