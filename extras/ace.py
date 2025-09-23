@@ -214,7 +214,7 @@ class BunnyAce:
             ]
         }
         self._create_mmu_sensor(config, extruder_sensor_pin, "extruder_sensor", self.extruder_sensor_handler)
-        if toolhead_sensor_pin is not None:
+        if toolhead_sensor_pin is not None and len(toolhead_sensor_pin) >= 2:
             self._create_mmu_sensor(config, toolhead_sensor_pin, "toolhead_sensor")
 
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
