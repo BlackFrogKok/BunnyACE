@@ -2,8 +2,10 @@ import serial, threading, time, logging, json, struct, queue, traceback, re
 from serial import SerialException
 import serial.tools.list_ports
 
+
 class MmuRunoutHelper:
-    def __init__(self, printer, name, event_delay, insert_gcode, remove_gcode, runout_gcode, insert_remove_in_print, button_handler, switch_pin):
+    def __init__(self, printer, name, event_delay, insert_gcode, remove_gcode, runout_gcode, insert_remove_in_print,
+                 button_handler, switch_pin):
 
         self.printer, self.name = printer, name
         self.insert_gcode, self.remove_gcode, self.runout_gcode = insert_gcode, remove_gcode, runout_gcode
@@ -14,7 +16,7 @@ class MmuRunoutHelper:
         self.gcode = self.printer.lookup_object('gcode')
 
         self.min_event_systime = self.reactor.NEVER
-        self.event_delay = event_delay # Time between generated events
+        self.event_delay = event_delay  # Time between generated events
         self.filament_present = False
         self.sensor_enabled = True
         self.runout_suspended = None
@@ -32,7 +34,7 @@ class MmuRunoutHelper:
         prev_values[self.name] = self.cmd_SET_FILAMENT_SENSOR
 
     def _handle_ready(self):
-        self.min_event_systime = self.reactor.monotonic() + 2. # Time to wait before first events are processed
+        self.min_event_systime = self.reactor.monotonic() + 2.  # Time to wait before first events are processed
 
     def _insert_event_handler(self, eventtime):
         self._exec_gcode("%s EVENTTIME=%s" % (self.insert_gcode, eventtime))
@@ -53,7 +55,6 @@ class MmuRunoutHelper:
             except Exception:
                 logging.exception("MMU: Error running mmu sensor handler: `%s`" % command)
         self.min_event_systime = self.reactor.monotonic() + self.event_delay
-
 
     def note_filament_present(self, *args):
         if len(args) == 1:
@@ -83,20 +84,20 @@ class MmuRunoutHelper:
         else:
             is_printing = self.printer.lookup_object("idle_timeout").get_status(now)["state"] == "Printing"
 
-        if is_filament_present and self.insert_gcode: # Insert detected
+        if is_filament_present and self.insert_gcode:  # Insert detected
             if not is_printing or (is_printing and self.insert_remove_in_print):
                 self.min_event_systime = self.reactor.NEVER
-                #logging.info("MMU: filament sensor %s: insert event detected, Eventtime %.2f" % (self.name, eventtime))
+                # logging.info("MMU: filament sensor %s: insert event detected, Eventtime %.2f" % (self.name, eventtime))
                 self.reactor.register_callback(lambda reh: self._insert_event_handler(eventtime))
 
-        else: # Remove or Runout detected
+        else:  # Remove or Runout detected
             self.min_event_systime = self.reactor.NEVER
             if is_printing and self.runout_suspended is False and self.runout_gcode:
-                #logging.info("MMU: filament sensor %s: runout event detected, Eventtime %.2f" % (self.name, eventtime))
+                # logging.info("MMU: filament sensor %s: runout event detected, Eventtime %.2f" % (self.name, eventtime))
                 self.reactor.register_callback(lambda reh: self._runout_event_handler(eventtime))
             elif self.remove_gcode and (not is_printing or self.insert_remove_in_print):
                 # Just a "remove" event
-                #logging.info("MMU: filament sensor %s: remove event detected, Eventtime %.2f" % (self.name, eventtime))
+                # logging.info("MMU: filament sensor %s: remove event detected, Eventtime %.2f" % (self.name, eventtime))
                 self.reactor.register_callback(lambda reh: self._remove_event_handler(eventtime))
 
     def enable_runout(self, restore):
@@ -113,6 +114,7 @@ class MmuRunoutHelper:
         }
 
     cmd_QUERY_FILAMENT_SENSOR_help = "Query the status of the Filament Sensor"
+
     def cmd_QUERY_FILAMENT_SENSOR(self, gcmd):
         if self.filament_present:
             msg = "MMU Sensor %s: filament detected" % (self.name)
@@ -121,8 +123,10 @@ class MmuRunoutHelper:
         gcmd.respond_info(msg)
 
     cmd_SET_FILAMENT_SENSOR_help = "Sets the filament sensor on/off"
+
     def cmd_SET_FILAMENT_SENSOR(self, gcmd):
         self.sensor_enabled = bool(gcmd.get_int("ENABLE", 1))
+
 
 class BunnyAce:
     VARS_ACE_REVISION = 'ace__revision'
@@ -219,7 +223,7 @@ class BunnyAce:
 
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler('klippy:disconnect', self._handle_disconnect)
-        #self.printer.register_event_handler('klippy:shutdown', self._handle_disconnect)
+        # self.printer.register_event_handler('klippy:shutdown', self._handle_disconnect)
 
         self.gcode.register_command(
             'ACE_DEBUG', self.cmd_ACE_DEBUG,
@@ -252,7 +256,6 @@ class BunnyAce:
             'ACE_ENDLESS_SPOOL', self.cmd_ACE_ENDLESS_SPOOL,
             desc=self.cmd_ACE_ENDLESS_SPOOL_help
         )
-
 
     def _calc_crc(self, buffer):
         _crc = 0xffff
@@ -335,7 +338,7 @@ class BunnyAce:
             return eventtime + 0.2
 
         payload_len = struct.unpack('<H', buffer[2:4])[0]
-        #logging.info(str(buffer))
+        # logging.info(str(buffer))
         payload = buffer[4:4 + payload_len]
 
         crc_data = buffer[4 + payload_len:4 + payload_len + 2]
@@ -403,7 +406,6 @@ class BunnyAce:
         self._main_queue = queue.Queue()
         self.connect_timer = self.reactor.register_timer(self._connect, self.reactor.NOW)
 
-
     def _handle_disconnect(self):
         logging.info('ACE: Closing connection to ' + self.serial_id)
         self._serial.close()
@@ -414,7 +416,7 @@ class BunnyAce:
         self._queue = None
         self._main_queue = None
 
-    def dwell(self, delay = 1.):
+    def dwell(self, delay=1.):
         currTs = self.reactor.monotonic()
         self.reactor.pause(currTs + delay)
 
@@ -512,6 +514,8 @@ class BunnyAce:
             self._serial = serial.Serial(
                 port=self.serial_id,
                 baudrate=self.baud,
+                exclusive=True,
+                rtscts=True,
                 timeout=0,
                 write_timeout=0)
 
@@ -534,9 +538,7 @@ class BunnyAce:
         except Exception as e:
             self.gcode.respond_info(str(e))
 
-
         return eventtime + 1
-
 
     cmd_ACE_START_DRYING_help = 'Starts ACE Pro dryer'
 
@@ -670,12 +672,10 @@ class BunnyAce:
 
         self._retract(index, length, speed)
 
-
     def _set_feeding_speed(self, index, speed):
         def callback(self, response):
             if 'code' in response and response['code'] != 0:
                 raise ValueError("ACE Error: " + response['msg'])
-
 
         self.send_request(
             request={"method": "update_feeding_speed", "params": {"index": index, "speed": speed}},
@@ -696,7 +696,7 @@ class BunnyAce:
 
         self.wait_ace_ready()
 
-        self.save_variable('ace_filament_pos',"bowden", True)
+        self.save_variable('ace_filament_pos', "bowden", True)
         self._feed(tool,
                    self.toolchange_retract_length + self.toolhead_homing_max,
                    self.retract_speed,
@@ -789,7 +789,8 @@ class BunnyAce:
         self.save_variable('ace_current_index', tool, True)
         gcmd.respond_info(f"Tool {tool} load")
 
-    cmd_ACE_GATE_MAP_help ='Set ace gate info'
+    cmd_ACE_GATE_MAP_help = 'Set ace gate info'
+
     def cmd_ACE_GATE_MAP(self, gcmd):
         gate = gcmd.get_int('GATE', None)
 
@@ -811,11 +812,13 @@ class BunnyAce:
             gcmd.respond_info('ACE_MAP' + str(gate))
 
     cmd_ACE_ENDLESS_SPOOL_help = 'Enable/disable ace endless spool'
+
     def cmd_ACE_ENDLESS_SPOOL(self, gcmd):
         enable = gcmd.get_int('ENABLE', 1)
         self.save_variable('ace_endless_spool', bool(enable), True)
 
     cmd_ACE_DEBUG_help = 'ACE Debug'
+
     def cmd_ACE_DEBUG(self, gcmd):
         method = gcmd.get('METHOD')
         params = gcmd.get('PARAMS', '{}')
@@ -846,3 +849,4 @@ class BunnyAce:
 
 def load_config(config):
     return BunnyAce(config)
+
