@@ -162,6 +162,7 @@ class BunnyAce:
         self.feed_speed = config.getint('feed_speed', 50)
         self.retract_speed = config.getint('retract_speed', 50)
         self.toolchange_retract_length = config.getint('toolchange_retract_length', 100)
+        self.toolchange_feed_length = config.getint('toolchange_feed_length', 100)
         self.toolhead_homing_max = config.getint('toolhead_homing_max', 100)
         self.toolhead_homing_speed = config.getint('toolhead_homing_speed', 10)
         self.extruder_move_speed = config.getint('extruder_move_speed', 10)
@@ -742,14 +743,14 @@ class BunnyAce:
         self.save_variable('ace_filament_pos', "bowden", True)
         start_fast_feed = self.reactor.monotonic()
         self._feed(tool,
-                   self.toolchange_retract_length + self.toolhead_homing_max,
+                   self.toolchange_feed_length + self.toolhead_homing_max,
                    self.feed_speed,
                    0
                    )
 
         while not bool(sensor_extruder.runout_helper.filament_present):
             if (start_fast_feed and
-                    (self.reactor.monotonic - start_fast_feed) >= self.toolchange_retract_length/self.feed_speed):
+                    (self.reactor.monotonic - start_fast_feed) >= self.toolchange_feed_length/self.feed_speed):
                 self._set_feeding_speed(tool, self.toolhead_homing_speed)
                 start_fast_feed = 0
 
