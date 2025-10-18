@@ -75,7 +75,7 @@ copy_config()
   if [ ! -f "${KLIPPER_CONFIG_HOME}/ace.cfg" ]; then
       cat "${SRCDIR}/ace.cfg" | sed -e "s|{config_path}|${KLIPPER_CONFIG_HOME}|g" > ace.cfg.tmp
       mv ace.cfg.tmp "${KLIPPER_CONFIG_HOME}/ace.cfg"
-      cp ace_vars.cfg "${KLIPPER_CONFIG_HOME}/ace.cfg"
+      cp ace_vars.cfg "${KLIPPER_CONFIG_HOME}/ace_vars.cfg"
       echo "[OK]"
   else
       echo "[SKIPPED]"
@@ -95,7 +95,7 @@ uninstall()
         echo -n "Uninstalling... "
         rm -f "${KLIPPER_HOME}/klippy/extras/ace.py"
         echo "[OK]"
-        echo "You can now remove the [update_manager FrogAce] section in your moonraker.conf and delete this directory. Also remove all led_effect configurations from your Klipper configuration."
+        echo "You can now remove the [update_manager BunnyAce] section in your moonraker.conf and delete this directory. Also remove all led_effect configurations from your Klipper configuration."
     else
         echo "ace.py not found in \"${KLIPPER_HOME}/klippy/extras/\". Is it installed?"
         echo "[FAILED]"
