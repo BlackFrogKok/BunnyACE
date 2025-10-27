@@ -155,7 +155,7 @@ class BunnyAce:
         else:
             config.error("There is no [save_variables] in the config. Check installation guide")
 
-        self.serial_id = config.get('serial', '/dev/ttyACM0')
+        self.serial_id = self._get_serial_id()
         self.baud = config.getint('baud', 115200)
         extruder_sensor_pin = config.get('extruder_sensor_pin')
         toolhead_sensor_pin = config.get('toolhead_sensor_pin', None)
@@ -274,6 +274,7 @@ class BunnyAce:
         self._main_queue = queue.Queue()
         self.connect_timer = self.reactor.register_timer(self._connect, self.reactor.NOW)
 
+    
     def _handle_disconnect(self):
         logging.info('ACE: Closing connection to ' + self.serial_id)
         self._serial.close()
@@ -330,6 +331,15 @@ class BunnyAce:
         if self._request_id >= 300000:
             self._request_id = 0
         return self._request_id
+    
+    def _get_serial_id(self):
+        _vid = 0x018A
+        _pid = 0x28E9
+
+        _ports = serial.tools.list_ports.comports()
+        for _port in _ports:
+            if _port.vid == _vid and _port.pid ==_pid:
+                return _port.device
 
     def _serial_disconnect(self):
 
