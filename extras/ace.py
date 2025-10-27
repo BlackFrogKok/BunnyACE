@@ -334,8 +334,8 @@ class BunnyAce:
     
     def _get_serial_id(self):
         # These are placeholders. 
-        _vid = 0x0000
-        _pid = 0x0000
+        _vid = 0x018A
+        _pid = 0x28E9
 
         _ports = serial.tools.list_ports.comports()
         for _port in _ports:
