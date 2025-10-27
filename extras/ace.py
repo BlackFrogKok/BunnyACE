@@ -333,7 +333,6 @@ class BunnyAce:
         return self._request_id
     
     def _get_serial_id(self):
-        # These are placeholders. 
         _vid = 0x018A
         _pid = 0x28E9
 
