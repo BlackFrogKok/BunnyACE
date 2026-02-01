@@ -3,132 +3,40 @@ from serial import SerialException
 import serial.tools.list_ports
 
 
-class MmuRunoutHelper:
-    def __init__(self, printer, name, event_delay, insert_gcode, remove_gcode, runout_gcode, insert_remove_in_print,
-                 button_handler, switch_pin):
-
-        self.printer, self.name = printer, name
-        self.insert_gcode, self.remove_gcode, self.runout_gcode = insert_gcode, remove_gcode, runout_gcode
-        self.insert_remove_in_print = insert_remove_in_print
-        self.button_handler = button_handler
-        self.switch_pin = switch_pin
-        self.reactor = self.printer.get_reactor()
-        self.gcode = self.printer.lookup_object('gcode')
-
-        self.min_event_systime = self.reactor.NEVER
-        self.event_delay = event_delay  # Time between generated events
-        self.filament_present = False
-        self.sensor_enabled = True
-        self.runout_suspended = None
-        self.button_handler_suspended = False
-
-        self.printer.register_event_handler("klippy:ready", self._handle_ready)
-
-        # Replace previous runout_helper mux commands with ours
-        prev = self.gcode.mux_commands.get("QUERY_FILAMENT_SENSOR")
-        _, prev_values = prev
-        prev_values[self.name] = self.cmd_QUERY_FILAMENT_SENSOR
-
-        prev = self.gcode.mux_commands.get("SET_FILAMENT_SENSOR")
-        _, prev_values = prev
-        prev_values[self.name] = self.cmd_SET_FILAMENT_SENSOR
-
-    def _handle_ready(self):
-        self.min_event_systime = self.reactor.monotonic() + 2.  # Time to wait before first events are processed
-
-    def _insert_event_handler(self, eventtime):
-        self._exec_gcode("%s EVENTTIME=%s" % (self.insert_gcode, eventtime))
-
-    def _remove_event_handler(self, eventtime):
-        self._exec_gcode("%s EVENTTIME=%s" % (self.remove_gcode, eventtime))
-
-    def _runout_event_handler(self, eventtime):
-        # Pausing from inside an event requires that the pause portion of pause_resume execute immediately.
-        pause_resume = self.printer.lookup_object('pause_resume')
-        pause_resume.send_pause_command()
-        self._exec_gcode("%s EVENTTIME=%s" % (self.runout_gcode, eventtime))
-
-    def _exec_gcode(self, command):
-        if command:
-            try:
-                self.gcode.run_script(command)
-            except Exception:
-                logging.exception("MMU: Error running mmu sensor handler: `%s`" % command)
-        self.min_event_systime = self.reactor.monotonic() + self.event_delay
-
-    def note_filament_present(self, *args):
-        if len(args) == 1:
-            eventtime = self.reactor.monotonic()
-            is_filament_present = args[0]
-        else:
-            eventtime = args[0]
-            is_filament_present = args[1]
-
-        # Button handlers are used for sync feedback state switches
-        if self.button_handler and not self.button_handler_suspended:
-            self.button_handler(eventtime, is_filament_present, self)
-
-        if is_filament_present == self.filament_present: return
-        self.filament_present = is_filament_present
-
-        # Don't handle too early or if disabled
-        if eventtime >= self.min_event_systime and self.sensor_enabled:
-            self._process_state_change(eventtime, is_filament_present)
-
-    def _process_state_change(self, eventtime, is_filament_present):
-        # Determine "printing" status
-        now = self.reactor.monotonic()
-        print_stats = self.printer.lookup_object("print_stats", None)
-        if print_stats is not None:
-            is_printing = print_stats.get_status(now)["state"] == "printing"
-        else:
-            is_printing = self.printer.lookup_object("idle_timeout").get_status(now)["state"] == "Printing"
-
-        if is_filament_present and self.insert_gcode:  # Insert detected
-            if not is_printing or (is_printing and self.insert_remove_in_print):
-                self.min_event_systime = self.reactor.NEVER
-                # logging.info("MMU: filament sensor %s: insert event detected, Eventtime %.2f" % (self.name, eventtime))
-                self.reactor.register_callback(lambda reh: self._insert_event_handler(eventtime))
-
-        else:  # Remove or Runout detected
-            self.min_event_systime = self.reactor.NEVER
-            if is_printing and self.runout_suspended is False and self.runout_gcode:
-                # logging.info("MMU: filament sensor %s: runout event detected, Eventtime %.2f" % (self.name, eventtime))
-                self.reactor.register_callback(lambda reh: self._runout_event_handler(eventtime))
-            elif self.remove_gcode and (not is_printing or self.insert_remove_in_print):
-                # Just a "remove" event
-                # logging.info("MMU: filament sensor %s: remove event detected, Eventtime %.2f" % (self.name, eventtime))
-                self.reactor.register_callback(lambda reh: self._remove_event_handler(eventtime))
-
-    def enable_runout(self, restore):
-        self.runout_suspended = not restore
-
-    def enable_button_feedback(self, restore):
-        self.button_handler_suspended = not restore
-
-    def get_status(self, eventtime):
-        return {
-            "filament_detected": bool(self.filament_present),
-            "enabled": bool(self.sensor_enabled),
-            "runout_suspended": bool(self.runout_suspended),
-        }
-
-    cmd_QUERY_FILAMENT_SENSOR_help = "Query the status of the Filament Sensor"
-
-    def cmd_QUERY_FILAMENT_SENSOR(self, gcmd):
-        if self.filament_present:
-            msg = "MMU Sensor %s: filament detected" % (self.name)
-        else:
-            msg = "MMU Sensor %s: filament not detected" % (self.name)
-        gcmd.respond_info(msg)
-
-    cmd_SET_FILAMENT_SENSOR_help = "Sets the filament sensor on/off"
-
-    def cmd_SET_FILAMENT_SENSOR(self, gcmd):
-        self.sensor_enabled = bool(gcmd.get_int("ENABLE", 1))
-
 class AceException(Exception):
     pass
+
+ACTION_IDLE = 'Idle'
+ACTION_LOADING = 'Loading'
+ACTION_LOADING_EXTRUDER = 'Loading Ext'
+ACTION_UNLOADING = 'Unloading'
+ACTION_UNLOADING_EXTRUDER = 'Unloading Ext'
+ACTION_FORMING_TIP = 'Forming Tip'
+ACTION_CUTTING_TIP = 'Cutting Tip'
+ACTION_HEATING = 'Heating'
+ACTION_CHECKING = 'Checking'
+ACTION_HOMING = 'Homing'
+ACTION_SELECTING = 'Selecting'
+ACTION_CUTTING_FILAMENT = 'Cutting Filament'
+ACTION_PURGING = 'Purging'
+
+FILAMENT_POS_UNKNOWN = -1
+FILAMENT_POS_UNLOADED = 0 # Parked in gate
+FILAMENT_POS_HOMED_GATE = 1 # Homed at either gate or gear sensor (currently assumed mutually exclusive sensors)
+FILAMENT_POS_START_BOWDEN = 2 # Point of fast load portion
+FILAMENT_POS_IN_BOWDEN = 3 # Some unknown position in the bowden
+FILAMENT_POS_END_BOWDEN = 4 # End of fast load portion
+FILAMENT_POS_HOMED_ENTRY = 5 # Homed at entry sensor
+FILAMENT_POS_HOMED_EXTRUDER = 6 # Collision homing case at extruder gear entry
+FILAMENT_POS_EXTRUDER_ENTRY = 7 # Past extruder gear entry
+FILAMENT_POS_HOMED_TS = 8 # Homed at toolhead sensor
+FILAMENT_POS_IN_EXTRUDER = 9 # In extruder past toolhead sensor
+FILAMENT_POS_LOADED = 10 # Homed to nozzle
+
+GATE_UNKNOWN = -1
+GATE_EMPTY = 0
+GATE_AVAILABLE = 1 # Available to load from either buffer or spool
+
 
 class BunnyAce:
     VARS_ACE_REVISION = 'ace__revision'
@@ -140,8 +48,26 @@ class BunnyAce:
         self.reactor = self.printer.get_reactor()
         self.gcode = self.printer.lookup_object('gcode')
         self._name = config.get_name()
-        self.lock = False
         self.send_time = None
+        self.ace_dev_fd = None
+        self.heatbeat_timer = None
+
+        self.gate_color = ['ffffff', 'ffffff', 'ffffff', 'ffffff']
+        self.gate_material = ['PLA', 'PLA', 'PLA', 'PLA']
+        self.gate_name = ['PLA', 'PLA', 'PLA', 'PLA']
+        self.gate_temp = [220, 220, 220, 220]
+        self.gate_speed = [100, 100, 100, 100]
+        self.gate_spool_id = [-1, -1, -1, -1]
+        self.gate_status = [GATE_UNKNOWN, GATE_UNKNOWN, GATE_UNKNOWN, GATE_UNKNOWN]
+        self.ttg_map = [0, 1, 2, 3]
+        self.last_tool = -1
+        self.next_tool = -1
+        self.current_gate = -1
+        self.num_toolchanges = 0
+        self.error_msg = ""
+        self.ace_action = ACTION_IDLE
+        self.filament_pos = FILAMENT_POS_UNLOADED
+
         self.read_buffer = bytearray()
         if self._name.startswith('ace '):
             self._name = self._name[4:]
@@ -155,10 +81,28 @@ class BunnyAce:
         else:
             config.error("There is no [save_variables] in the config. Check installation guide")
 
+        for var, attr in [('ace_gate_color', 'gate_color'),
+                          ('ace_gate_type', 'gate_material'),
+                          ('ace_gate_name', 'gate_name'),
+                          ('ace_gate_speed', 'gate_speed'),
+                          ('ace_gate_spool_id', 'gate_spool_id'),
+                          ('ace_gate_temp', 'gate_temp')]:
+            value = self.save_variables.allVariables.get(var, getattr(self, attr))
+            setattr(self, attr, value)
+
+        self.current_gate = self.save_variables.allVariables.get('ace_current_index', -1)
+        self.filament_pos = self.save_variables.allVariables.get('ace_filament_pos', FILAMENT_POS_UNKNOWN)
+
+
+        self.pause_resume = self.printer.lookup_object('pause_resume', None)
+        if self.pause_resume is None:
+            raise config.error("ACE requires [pause_resume] to work, please add it to your config!")
+
         self.serial_id = config.get('serial', '/dev/ttyACM0')
         self.baud = config.getint('baud', 115200)
-        extruder_sensor_pin = config.get('extruder_sensor_pin')
-        toolhead_sensor_pin = config.get('toolhead_sensor_pin', None)
+
+        self.extruder_sensor_name = config.get('extruder_sensor_name')
+        self.toolhead_sensor_name = config.get('toolhead_sensor_name', None)
         self.feed_speed = config.getint('feed_speed', 50)
         self.retract_speed = config.getint('retract_speed', 50)
         self.toolchange_retract_length = config.getint('toolchange_retract_length', 100)
@@ -177,10 +121,8 @@ class BunnyAce:
         self._callback_map = {}
         self._feed_assist_index = -1
         self._request_id = 0
-        self.endstops = {}
 
         # Default data to prevent exceptions
-        self.gate_status = ['empty', 'empty', 'empty', 'empty']
         self._info = {
             'status': 'ready',
             'dryer_status': {
@@ -225,13 +167,10 @@ class BunnyAce:
                 }
             ]
         }
-        self._create_mmu_sensor(config, extruder_sensor_pin, "extruder_sensor", self.extruder_sensor_handler)
-        if toolhead_sensor_pin is not None and len(toolhead_sensor_pin) >= 2:
-            self._create_mmu_sensor(config, toolhead_sensor_pin, "toolhead_sensor")
+        self.extruder_sensor = None
 
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler('klippy:disconnect', self._handle_disconnect)
-        # self.printer.register_event_handler('klippy:shutdown', self._handle_disconnect)
 
         self.gcode.register_command(
             'ACE_DEBUG', self.cmd_ACE_DEBUG,
@@ -264,25 +203,28 @@ class BunnyAce:
             'ACE_ENDLESS_SPOOL', self.cmd_ACE_ENDLESS_SPOOL,
             desc=self.cmd_ACE_ENDLESS_SPOOL_help
         )
+        self.gcode.register_command(
+            'ACE_SENSOR_RUNOUT', self.extruder_sensor_handler,
+            desc=self.cmd_ACE_SENSOR_RUNOUT_help
+        )
 
     def _handle_ready(self):
         self.toolhead = self.printer.lookup_object('toolhead')
+
+        self.extruder_sensor = self.printer.lookup_object(f'filament_switch_sensor %s' % self.extruder_sensor_name)
+        if self.extruder_sensor is None:
+            self.printer.config_error("[filament_switch_sensor %s] not found" % self.extruder_sensor_name)
+
         logging.info('ACE: Connecting to ' + self.serial_id)
         # We can catch timing where ACE reboots itself when no data is available from host. We're avoiding it with this hack
         self._connected = False
         self._queue = queue.Queue()
-        self._main_queue = queue.Queue()
         self.connect_timer = self.reactor.register_timer(self._connect, self.reactor.NOW)
 
     def _handle_disconnect(self):
         logging.info('ACE: Closing connection to ' + self.serial_id)
-        self._serial.close()
-        self._connected = False
-        self.reactor.unregister_timer(self.writer_timer)
-        self.reactor.unregister_timer(self.reader_timer)
-
+        self._serial_disconnect()
         self._queue = None
-        self._main_queue = None
 
     def _color_message(self, msg):
         try:
@@ -307,6 +249,7 @@ class BunnyAce:
         self.gcode.respond_raw(c_msg)
 
     def log_error(self, msg):
+        self.error_msg = msg
         self.gcode.respond_raw("!! %s" % msg)
 
     def save_variable(self, variable, value, write=False):
@@ -336,9 +279,11 @@ class BunnyAce:
         if self._serial is not None and self._serial.is_open:
             self._serial.close()
             self._connected = False
-
-        self.reactor.unregister_timer(self.reader_timer)
-        self.reactor.unregister_timer(self.writer_timer)
+        if self.heatbeat_timer:
+            self.reactor.unregister_timer(self.heatbeat_timer)
+        if self.ace_dev_fd:
+            self.reactor.set_fd_wake(self.ace_dev_fd, False, False)
+            self.ace_dev_fd = None
 
     def _connect(self, eventtime):
         self.log_always('Try connecting')
@@ -362,8 +307,12 @@ class BunnyAce:
                 self._connected = True
                 self._request_id = 0
                 logging.info('ACE: Connected to ' + self.serial_id)
-                self.writer_timer = self.reactor.register_timer(self._writer, eventtime + 2)
-                self.reader_timer = self.reactor.register_timer(self._reader, eventtime + 2)
+                self.ace_dev_fd = self.reactor.register_fd(
+                    self._serial.fileno(),
+                    self._reader,
+                    self._writer
+                )
+                self.heatbeat_timer = self.reactor.register_timer(self._periodic_heartbeat_event, self.reactor.NOW)
                 self.send_request(request={"method": "get_info"},
                                   callback=lambda self, response: info_callback(self, response))
                 if self._feed_assist_index != -1:
@@ -402,25 +351,29 @@ class BunnyAce:
         data += bytes([0xFE])
         self._serial.write(data)
 
+    def _periodic_heartbeat_event(self, eventtime):
+        def callback(self, response):
+            if response is not None:
+                self._info = response['result']
+                self.gate_status = [GATE_EMPTY if data['status'] == 'empty' else GATE_AVAILABLE
+                                    for data in self._info['slots']]
+
+        self.send_request({"method": "get_status"}, callback)
+        return eventtime + 2.5
+
     def _reader(self, eventtime):
-
-        if self.lock and (self.reactor.monotonic() - self.send_time) > 2:
-            self.lock = False
-            self.read_buffer = bytearray()
-            self.gcode.respond_info(f"timeout {self.reactor.monotonic()} {self._serial.is_open}")
-
         try:
-            if self.lock and self._serial.in_waiting:
+            if self._serial.in_waiting:
                 raw_bytes = self._serial.read(size=self._serial.in_waiting)
             else:
                 raw_bytes = bytearray()
-        except Exception:
+        except Exception as e:
             self.log_error("Unable to communicate with the ACE PRO")
             self.log_warning("Try reconnecting")
-            self.lock = False
+            logging.info('ACE error: ' + traceback.format_exc())
             self._serial_disconnect()
             self.connect_timer = self.reactor.register_timer(self._connect, self.reactor.NOW)
-            return self.reactor.NEVER
+            return
 
         if len(raw_bytes):
             text_buffer = self.read_buffer + raw_bytes
@@ -430,18 +383,17 @@ class BunnyAce:
                 self.read_buffer = bytearray()
             else:
                 self.read_buffer += raw_bytes
-                return eventtime + 0.2
+                return
         else:
-            return eventtime + 0.2
+            return
 
         if len(buffer) < 7:
-            return eventtime + 0.2
+            return
 
         if buffer[0:2] != bytes([0xFF, 0xAA]):
-            self.lock = False
             self.gcode.respond_info("Invalid data from ACE PRO (head bytes)")
             self.gcode.respond_info(str(buffer))
-            return eventtime + 0.2
+            return
 
         payload_len = struct.unpack('<H', buffer[2:4])[0]
         # logging.info(str(buffer))
@@ -451,13 +403,11 @@ class BunnyAce:
         crc = struct.pack('@H', self._calc_crc(payload))
 
         if len(buffer) < (4 + payload_len + 2 + 1):
-            self.lock = False
             self.gcode.respond_info(f"Invalid data from ACE PRO (len) {payload_len} {len(buffer)} {crc}")
             self.gcode.respond_info(str(buffer))
-            return eventtime + 0.2
+            return
 
         if crc_data != crc:
-            self.lock = False
             self.gcode.respond_info('Invalid data from ACE PRO (CRC)')
 
         ret = json.loads(payload.decode('utf-8'))
@@ -465,41 +415,27 @@ class BunnyAce:
         if id in self._callback_map:
             callback = self._callback_map.pop(id)
             callback(self=self, response=ret)
-            self.lock = False
-        return eventtime + 0.2
 
     def _writer(self, eventtime):
         try:
-            def callback(self, response):
-                if response is not None:
-                    self._info = response['result']
-                    self.gate_status = [data['status'] for data in self._info['slots']]
-
-            if not self.lock:
-                if not self._queue.empty():
-                    task = self._queue.get()
-                    if task is not None:
-                        id = self._get_next_request_id()
-                        self._callback_map[id] = task[1]
-                        task[0]['id'] = id
-                        self._send_request(task[0])
-                else:
+            if not self._queue.empty():
+                task = self._queue.get()
+                if task is not None:
                     id = self._get_next_request_id()
-                    self._callback_map[id] = callback
-                    self._send_request({"id": id, "method": "get_status"})
-                self.send_time = eventtime
-                self.lock = True
+                    self._callback_map[id] = task[1]
+                    task[0]['id'] = id
+                    self._send_request(task[0])
+                    self.send_time = eventtime
         except Exception:
             logging.info('ACE error: ' + traceback.format_exc())
-            self.lock = False
             self.gcode.respond_info('Try reconnecting')
             self._serial_disconnect()
             self.connect_timer = self.reactor.register_timer(self._connect, self.reactor.NOW)
-            return self.reactor.NEVER
-        return eventtime + 0.5
 
     def send_request(self, request, callback):
         self._info['status'] = 'busy'
+        if self.ace_dev_fd:
+            self.reactor.set_fd_wake(self.ace_dev_fd, True, True)
         self._queue.put([request, callback])
 
 
@@ -522,10 +458,10 @@ class BunnyAce:
         self.toolhead.move(pos, speed)
         return pos[3]
 
+    cmd_ACE_SENSOR_RUNOUT_help = 'Extruder sensor runout gcode'
 
-
-    def extruder_sensor_handler(self, eventtime, is_filament_present, runout_helper):
-        was_index = self.save_variables.allVariables.get('ace_current_index', -1)
+    def extruder_sensor_handler(self, gcmd):
+        was_index = self.current_gate
         now = self.reactor.monotonic()
         print_stats = self.printer.lookup_object("print_stats", None)
         if print_stats is not None:
@@ -533,11 +469,11 @@ class BunnyAce:
         else:
             is_printing = self.printer.lookup_object("idle_timeout").get_status(now)["state"] == "Printing"
 
-        if (not is_filament_present) and self._info['slots'][was_index]['status'] == 'empty' and is_printing:
-            ace_material = self.save_variables.allVariables.get('ace_gate_type',['', '', '', ''])
+        if (not self.extruder_sensor.runout_helper.filament_present) and self._info['slots'][was_index]['status'] == 'empty' and is_printing:
+            ace_material = self.gate_material
+            self.current_gate = -1
             self.save_variable('ace_current_index', -1, True)
-            pause_resume = self.printer.lookup_object('pause_resume')
-            pause_resume.send_pause_command()
+            self.pause_resume.send_pause_command()
 
             if self.save_variables.allVariables.get('ace_endless_spool', False):
                 self.log_always('Endless spool')
@@ -549,33 +485,9 @@ class BunnyAce:
                     return
                 self.log_always('{2}Change to spool: %s{0}' % spools[0]["index"], True)
                 self.gcode.run_script_from_command(f'T{spools[0]["index"]}')
-                pause_resume.send_resume_command()
+                self.pause_resume.send_resume_command()
             else:
                 self.log_warning('Filament runout! Endless spool disabled')
-
-    def _create_mmu_sensor(self, config, pin, name, handler=None):
-
-        section = "filament_switch_sensor %s" % name
-        config.fileconfig.add_section(section)
-        config.fileconfig.set(section, "switch_pin", pin)
-        config.fileconfig.set(section, "pause_on_runout", "False")
-        fs = self.printer.load_object(config, section)
-
-        ro_helper = MmuRunoutHelper(self.printer, name, 0.1, '', '', '',
-                                    False, handler, pin)
-        fs.runout_helper = ro_helper
-        fs.get_status = ro_helper.get_status
-
-        ppins = self.printer.lookup_object('pins')
-        pin_params = ppins.parse_pin(pin, True, True)
-        share_name = "%s:%s" % (pin_params['chip_name'], pin_params['pin'])
-        ppins.allow_multi_use_pin(share_name)
-        mcu_endstop = ppins.setup_pin('endstop', pin)
-
-        query_endstops = self.printer.load_object(config, "query_endstops")
-        query_endstops.register_endstop(mcu_endstop, share_name)
-        self.endstops[name] = mcu_endstop
-
 
 
     cmd_ACE_START_DRYING_help = 'Starts ACE Pro dryer'
@@ -633,7 +545,7 @@ class BunnyAce:
 
         self._enable_feed_assist(index)
 
-    def _disable_feed_assist(self, index):
+    def _disable_feed_assist(self, index=-1):
         def callback(self, response):
             if 'code' in response and response['code'] != 0:
                 self.log_error("ACE Error: " + response['msg'])
@@ -642,7 +554,7 @@ class BunnyAce:
             self._feed_assist_index = -1
             self.gcode.respond_info('Disabled ACE feed assist')
 
-        self.send_request(request={"method": "stop_feed_assist", "params": {"index": index}}, callback=callback)
+        self.send_request(request={"method": "stop_feed_assist", "params": {"index": self._feed_assist_index}}, callback=callback)
         self.dwell(0.3)
 
     cmd_ACE_DISABLE_FEED_ASSIST_help = 'Disables ACE feed assist'
@@ -735,12 +647,12 @@ class BunnyAce:
             callback=callback)
 
     def _park_to_toolhead(self, tool):
-
-        sensor_extruder = self.printer.lookup_object("filament_switch_sensor extruder_sensor", None)
+        self.current_gate = tool
 
         self.wait_ace_ready()
+        self.ace_action = ACTION_LOADING
+        self.filament_pos = FILAMENT_POS_START_BOWDEN
 
-        self.save_variable('ace_filament_pos', "bowden", True)
         start_fast_feed = self.reactor.monotonic()
         self._feed(tool,
                    self.toolchange_feed_length + self.toolhead_homing_max,
@@ -748,102 +660,170 @@ class BunnyAce:
                    0
                    )
 
-        while not bool(sensor_extruder.runout_helper.filament_present):
+        self.filament_pos = FILAMENT_POS_IN_BOWDEN
+        self.save_variable('ace_filament_pos', self.filament_pos, True)
+
+        while not bool(self.extruder_sensor.runout_helper.filament_present):
             if (start_fast_feed and
                     (self.reactor.monotonic() - start_fast_feed) >= (self.toolchange_feed_length//self.feed_speed)):
                 self._set_feeding_speed(tool, self.toolhead_homing_speed)
                 start_fast_feed = 0
+                self.filament_pos = FILAMENT_POS_END_BOWDEN
+                self.save_variable('ace_filament_pos', self.filament_pos, True)
 
             if self.is_ace_ready():
-                raise AceException('ACE Error: Load failed: Failed to reach toolhead sensor')
+                raise AceException('ACE Error: Load failed: Failed to reach extruder sensor')
             self.dwell(delay=0.01)
 
+
         self._stop_feeding(tool)
+        self.filament_pos = FILAMENT_POS_HOMED_EXTRUDER
+        self.save_variable('ace_filament_pos', self.filament_pos, True)
 
         self.wait_ace_ready()
 
         self._enable_feed_assist(tool)
 
-        self.save_variable('ace_filament_pos', "bowden", True)
-
-        if 'toolhead_sensor' in self.endstops:
-            toolhead_sensor = self.printer.lookup_object("filament_switch_sensor toolhead_sensor", None)
+        self.ace_action = ACTION_LOADING_EXTRUDER
+        self.filament_pos = FILAMENT_POS_HOMED_EXTRUDER
+        if self.toolhead_sensor_name:
+            toolhead_sensor = self.printer.lookup_object("filament_switch_sensor %s" % self.toolhead_sensor_name, None)
             while not bool(toolhead_sensor.runout_helper.filament_present):
                 self._extruder_move(1, self.extruder_move_speed)
                 self.dwell(delay=0.01)
 
-        self.save_variable('ace_filament_pos', "toolhead", True)
+        self.save_variable('ace_filament_pos', self.filament_pos, True)
 
         self._extruder_move(self.toolhead_sensor_to_nozzle_length, self.extruder_move_speed)
-        self.save_variable('ace_filament_pos', "nozzle", True)
+        self.filament_pos = FILAMENT_POS_EXTRUDER_ENTRY
 
         gcode_move = self.printer.lookup_object('gcode_move')
         gcode_move.reset_last_position()
+        self.ace_action = ACTION_PURGING
+
+        self.filament_pos = FILAMENT_POS_LOADED
+        self.save_variable('ace_filament_pos', self.filament_pos, True)
         self.gcode.run_script_from_command(self.poop_macros)
+        self.ace_action = ACTION_IDLE
+
 
     cmd_ACE_CHANGE_TOOL_help = 'Changes tool'
 
-    def cmd_ACE_CHANGE_TOOL(self, gcmd):
+    def cmd_ACE_TTG_MAP(self, gcmd):
         tool = gcmd.get_int('TOOL')
-        sensor_extruder = self.printer.lookup_object("filament_switch_sensor %s" % "extruder_sensor", None)
+        gate = gcmd.get_int('GATE')
+        self.ttg_map[gate] = tool
+        self.save_variable('ace_ttg_map', self.ttg_map, True)
 
-        if tool < -1 or tool >= 4:
+    def cmd_ACE_CHANGE_TOOL(self, gcmd):
+        tool = gcmd.get_int('TOOL', None)
+        gate = gcmd.get_int('GATE', None)
+        if tool:
+            gate = self.ttg_map[tool]
+
+        if gate < -1 or gate >= 4:
             raise gcmd.error('Wrong tool')
 
-        was = self.save_variables.allVariables.get('ace_current_index', -1)
-        if was == tool:
-            self.log_always('ACE: Not changing tool, current index already ' + str(tool))
+
+        if self.current_gate == gate:
+            self.log_always('ACE: Not changing tool, current index already ' + str(gate))
             return
 
-        if tool != -1:
-            status = self._info['slots'][tool]['status']
+        if gate != -1:
+            status = self._info['slots'][gate]['status']
             if status != 'ready':
                 self.log_error("ACE Error: This spool is not ready")
-                self.gcode.run_script_from_command('_ACE_ON_EMPTY_ERROR INDEX=' + str(tool))
+                self.gcode.run_script_from_command('_ACE_ON_EMPTY_ERROR INDEX=' + str(gate))
                 return
-        self.gcode.run_script_from_command('_ACE_PRE_TOOLCHANGE FROM=' + str(was) + ' TO=' + str(tool))
 
-        logging.info('ACE: Toolchange ' + str(was) + ' => ' + str(tool))
-        self.log_always('ACE: Toolchange ' + str(was) + ' => ' + str(tool))
+        self.last_tool = self.current_gate
+        self.next_tool = gate
 
-        if was != -1:
-            self._disable_feed_assist(was)
+
+        self.ace_action = ACTION_HEATING
+        self.gcode.run_script_from_command('_ACE_PRE_TOOLCHANGE FROM=' + str(self.last_tool) + ' TO=' + str(gate))
+
+        logging.info('ACE: Toolchange ' + str(self.last_tool) + ' => ' + str(gate))
+        self.log_always('ACE: Toolchange ' + str(self.last_tool) + ' => ' + str(gate))
+
+        if self.last_tool != -1:
+            self._disable_feed_assist(self.last_tool)
             self.wait_ace_ready()
-            if self.save_variables.allVariables.get('ace_filament_pos', "spliter") == "nozzle":
+            if self.save_variables.allVariables.get('ace_filament_pos', FILAMENT_POS_UNKNOWN) == FILAMENT_POS_LOADED:
+                self.ace_action = ACTION_CUTTING_FILAMENT
                 self.gcode.run_script_from_command(self.cut_macros)
-                self.save_variable('ace_filament_pos', "toolhead", True)
+                self.filament_pos = FILAMENT_POS_IN_EXTRUDER
+                self.save_variable('ace_filament_pos', self.filament_pos, True)
+                self.ace_action = ACTION_IDLE
 
-            if self.save_variables.allVariables.get('ace_filament_pos', "spliter") == "toolhead":
-                while bool(sensor_extruder.runout_helper.filament_present):
+            if self.save_variables.allVariables.get('ace_filament_pos', FILAMENT_POS_UNKNOWN) == FILAMENT_POS_IN_EXTRUDER:
+                self.ace_action = ACTION_UNLOADING_EXTRUDER
+                self.filament_pos = FILAMENT_POS_EXTRUDER_ENTRY
+                while bool(self.extruder_sensor.runout_helper.filament_present):
                     self._extruder_move(-20, self.extruder_move_speed)
-                    self._retract(was, 20, self.retract_speed)
+                    self._retract(self.last_tool, 20, self.retract_speed)
                     self.wait_ace_ready()
-                self.save_variable('ace_filament_pos', "bowden", True)
+                self.filament_pos = FILAMENT_POS_END_BOWDEN
+                self.save_variable('ace_filament_pos', self.filament_pos, True)
+
 
             self.wait_ace_ready()
 
-            self._retract(was, self.toolchange_retract_length, self.retract_speed)
+            self.ace_action = ACTION_UNLOADING
+            self.filament_pos = FILAMENT_POS_IN_BOWDEN
+            self._retract(self.last_tool, self.toolchange_retract_length, self.retract_speed)
             self.wait_ace_ready()
-            self.save_variable('ace_filament_pos', "spliter", True)
+            self.filament_pos = FILAMENT_POS_UNLOADED
 
-            if tool != -1:
+            self.save_variable('ace_filament_pos', self.filament_pos, True)
+            self.ace_action = ACTION_IDLE
+            if gate != -1:
                 try:
-                    self._park_to_toolhead(tool)
+                    self._park_to_toolhead(gate)
                 except AceException as e:
+                    self.ace_action = ACTION_IDLE
                     self.log_error(str(e))
+                    return
         else:
             try:
-                self._park_to_toolhead(tool)
+                self._park_to_toolhead(gate)
             except AceException as e:
+                self.ace_action = ACTION_IDLE
                 self.log_error(str(e))
+                return
 
         gcode_move = self.printer.lookup_object('gcode_move')
         gcode_move.reset_last_position()
 
-        self.gcode.run_script_from_command('_ACE_POST_TOOLCHANGE FROM=' + str(was) + ' TO=' + str(tool))
+        self.gcode.run_script_from_command('_ACE_POST_TOOLCHANGE FROM=' + str(self.last_tool) + ' TO=' + str(gate))
         gcode_move.reset_last_position()
-        self.save_variable('ace_current_index', tool, True)
-        self.log_always("{2}Tool %s load{0}" % tool, True)
+        self.current_gate = gate
+        self.save_variable('ace_current_index', gate, True)
+        self.log_always("{2}Tool %s load{0}" % gate, True)
+        self.last_tool = -1
+        self.next_tool = -1
+        self.save_variable('ace_filament_pos', self.filament_pos, True)
+
+        now = self.reactor.monotonic()
+        print_stats = self.printer.lookup_object("print_stats", None)
+        if print_stats is not None:
+            is_printing = print_stats.get_status(now)["state"] == "printing"
+        else:
+            is_printing = self.printer.lookup_object("idle_timeout").get_status(now)["state"] == "Printing"
+
+        if is_printing:
+            self.num_toolchanges += 1
+
+
+    def update_gate_map(self):
+        self.save_variable('ace_gate_color', self.gate_color)
+        self.save_variable('ace_gate_type', self.gate_material)
+        self.save_variable('ace_gate_temp', self.gate_temp)
+        self.save_variable('ace_gate_name', self.gate_name)
+        self.save_variable('ace_gate_speed', self.gate_speed)
+        self.save_variable('ace_gate_spool_id', self.gate_spool_id)
+        self.write_variables()
+
 
     cmd_ACE_GATE_MAP_help = 'Set ace gate info'
 
@@ -852,18 +832,28 @@ class BunnyAce:
 
         if gate is not None:
             color = gcmd.get('COLOR', None)
-            type = gcmd.get('TYPE', None)
+            material = gcmd.get('MATERIAL', None)
+            name = gcmd.get('NAME', None)
             temp = gcmd.get_int('TEMP', None)
-            if not color and not type and not temp:
+            speed = gcmd.get_int('SPEED', None)
+            spool_id = gcmd.get_int('SPOOLID', None)
+
+            if not color and not material and not temp and not name and not speed and not spool_id:
                 gcmd.respond_info('ACE: Bad params')
                 return
             if color is not None:
-                self.save_variables.allVariables['ace_gate_color'][gate] = color
-            if type is not None:
-                self.save_variables.allVariables['ace_gate_type'][gate] = type
+                self.gate_color[gate] = color
+            if name is not None:
+                self.gate_name[gate] = name
+            if material is not None:
+                self.gate_material[gate] = material
             if temp is not None:
-                self.save_variables.allVariables['ace_gate_temp'][gate] = temp
-            self.write_variables()
+                self.gate_temp[gate] = temp
+            if speed is not None:
+                self.gate_speed[gate] = speed
+            if spool_id is not None:
+                self.gate_spool_id[gate] = spool_id
+            self.update_gate_map()
         else:
             gcmd.respond_info('ACE_MAP' + str(gate))
 
@@ -893,16 +883,7 @@ class BunnyAce:
             'status': self._info['status'],
             'temp': self._info['temp'],
             'dryer_status': self._info['dryer_status'],
-            'gate_color': list(self.save_variables.allVariables.get('ace_gate_color',
-                                                                    ['FFFFFF', 'FFFFFF', 'FFFFFF', 'FFFFFF'])),
-            'gate_material': list(self.save_variables.allVariables.get('ace_gate_type',
-                                                                       ['', '', '', ''])),
-            'gate_temp': list(self.save_variables.allVariables.get('ace_gate_temp',
-                                                                   [230, 230, 230, 230])),
-            'active_gate': self.gate_status,
-            'spool_id': [1, 1, 1, 2],
-            'selected_gate': int(self.save_variables.allVariables.get('ace_current_index', -1)),
-            'endless_spool': bool(self.save_variables.allVariables.get('ace_endless_spool', False)),
+            'gate_status': self.gate_status,
         }
 
 
