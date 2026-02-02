@@ -65,6 +65,8 @@ link_extension()
 {
     echo -n "Linking extension to Klipper... "
     ln -sf "${SRCDIR}/extras/ace.py" "${KLIPPER_HOME}/klippy/extras/ace.py"
+    ln -sf "${SRCDIR}/extras/mmu.py" "${KLIPPER_HOME}/klippy/extras/mmu.py"
+    ln -sf "${SRCDIR}/extras/mmu_machine.py" "${KLIPPER_HOME}/klippy/extras/mmu_machine.py"
     echo "[OK]"
 }
 
