@@ -94,10 +94,6 @@ class BunnyAce:
         self.filament_pos = self.save_variables.allVariables.get('ace_filament_pos', FILAMENT_POS_UNKNOWN)
 
 
-        self.pause_resume = self.printer.lookup_object('pause_resume', None)
-        if self.pause_resume is None:
-            raise config.error("ACE requires [pause_resume] to work, please add it to your config!")
-
         self.serial_id = config.get('serial', '/dev/ttyACM0')
         self.baud = config.getint('baud', 115200)
 
@@ -210,6 +206,10 @@ class BunnyAce:
 
     def _handle_ready(self):
         self.toolhead = self.printer.lookup_object('toolhead')
+
+        self.pause_resume = self.printer.lookup_object('pause_resume', None)
+        if self.pause_resume is None:
+            raise self.printer.config_error("ACE requires [pause_resume] to work, please add it to your config!")
 
         self.extruder_sensor = self.printer.lookup_object(f'filament_switch_sensor %s' % self.extruder_sensor_name)
         if self.extruder_sensor is None:
