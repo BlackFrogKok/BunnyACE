@@ -439,7 +439,6 @@ class BunnyAce:
         self._queue.put([request, callback])
 
 
-
     def wait_ace_ready(self):
         while self._info['status'] != 'ready':
             currTs = self.reactor.monotonic()
@@ -508,6 +507,7 @@ class BunnyAce:
 
             self.gcode.respond_info('Started ACE drying')
 
+        self.wait_ace_ready()
         self.send_request(
             request={"method": "drying", "params": {"temp": temperature, "fan_speed": 7000, "duration": duration}},
             callback=callback)
@@ -522,6 +522,7 @@ class BunnyAce:
 
             self.gcode.respond_info('Stopped ACE drying')
 
+        self.wait_ace_ready()
         self.send_request(request={"method": "drying_stop"}, callback=callback)
 
     def _enable_feed_assist(self, index):
@@ -530,8 +531,10 @@ class BunnyAce:
                 self.log_error("ACE Error: " + response['msg'])
             else:
                 self._feed_assist_index = index
-                self.gcode.respond_info(str(response))
 
+
+
+        self.wait_ace_ready()
         self.send_request(request={"method": "start_feed_assist", "params": {"index": index}}, callback=callback)
         self.dwell(delay=0.7)
 
@@ -554,6 +557,7 @@ class BunnyAce:
             self._feed_assist_index = -1
             self.gcode.respond_info('Disabled ACE feed assist')
 
+        self.wait_ace_ready()
         self.send_request(request={"method": "stop_feed_assist", "params": {"index": self._feed_assist_index}}, callback=callback)
         self.dwell(0.3)
 
@@ -576,6 +580,7 @@ class BunnyAce:
                 self.log_error("ACE Error: " + response['msg'])
                 return
 
+        self.wait_ace_ready()
         self.send_request(
             request={"method": "feed_filament", "params": {"index": index, "length": length, "speed": speed}},
             callback=callback)
@@ -606,6 +611,7 @@ class BunnyAce:
                 self.log_error("ACE Error: " + response['msg'])
                 return
 
+        self.wait_ace_ready()
         self.send_request(
             request={"method": "unwind_filament", "params": {"index": index, "length": length, "speed": speed}},
             callback=callback)
@@ -706,27 +712,27 @@ class BunnyAce:
         self.gcode.run_script_from_command(self.poop_macros)
         self.ace_action = ACTION_IDLE
 
-
-    cmd_ACE_CHANGE_TOOL_help = 'Changes tool'
-
     def cmd_ACE_TTG_MAP(self, gcmd):
         tool = gcmd.get_int('TOOL')
         gate = gcmd.get_int('GATE')
         self.ttg_map[gate] = tool
         self.save_variable('ace_ttg_map', self.ttg_map, True)
 
+    cmd_ACE_CHANGE_TOOL_help = 'Changes tool'
     def cmd_ACE_CHANGE_TOOL(self, gcmd):
         tool = gcmd.get_int('TOOL', None)
         gate = gcmd.get_int('GATE', None)
-        if tool:
+
+        if tool is not None:
             gate = self.ttg_map[tool]
-
-        if gate < -1 or gate >= 4:
-            raise gcmd.error('Wrong tool')
-
+        elif gate is not None:
+            if gate < -1 or gate >= 4:
+                raise gcmd.error('Wrong tool')
+        else:
+            raise gcmd.error('Missing parameter TOOL or GATE')
 
         if self.current_gate == gate:
-            self.log_always('ACE: Not changing tool, current index already ' + str(gate))
+            self.log_warning('ACE: Not changing tool, current index already ' + str(gate))
             return
 
         if gate != -1:
