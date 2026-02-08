@@ -53,7 +53,7 @@
 Удалите/прокомментируйте все разделы о вашем текущем датчике филамента (filament runout sensor) в вашем printer.cfg, поскольку вы собираетесь использовать датчик в голове принтера (extruder_sensor) для обнаружения филамента.
 ```bash
 cd ~
-git clone https://github.com/BlackFrogKok/BunnyACE.git
+git clone https://github.com/BlackFrogKok/BunnyACE.git -b development
 cd BunnyACE
 ./install.sh
 ```

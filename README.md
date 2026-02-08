@@ -53,7 +53,7 @@ The script will automatically install the latest driver version.
 Remove/comment any sections about your current filament runout sensor in your printer.cfg since you are going to use extruder filament sensor for runout detection.
 ```bash
 cd ~
-git clone https://github.com/BlackFrogKok/BunnyACE.git
+git clone https://github.com/BlackFrogKok/BunnyACE.git -b development
 cd BunnyACE
 ./install.sh
 ```
